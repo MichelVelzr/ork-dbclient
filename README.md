@@ -122,33 +122,6 @@ dist/              Committed build output installed by Orca
 orca-plugin.json   Orca plugin manifest
 ```
 
-## Publishing a release
-
-1. Update `version` in `orca-plugin.json` and `package.json`, and add an entry to `CHANGELOG.md`.
-2. Build and validate:
-   ```bash
-     npm install
-     npm run check
-     npm run build
-     npm run validate
-   ```
-3. Commit everything, including `dist/`, then tag and push:
-   ```bash
-     git add .
-     git commit -m "Release 0.1.0"
-     git tag -a v0.1.0 -m v0.1.0
-     git push origin main
-     git push origin v0.1.0
-   ```
-4. Add the `orca-plugin` topic from the GitHub repository settings, or with the GitHub CLI:
-   ```bash
-     gh repo edit MichelVelzr/ork-dbclient --add-topic orca-plugin
-   ```
-5. Check the listing at \[[https://www.onorca.dev/plugins/MichelVelzr/ork-dbclient\]](https://www.onorca.dev/plugins/MichelVelzr/ork-dbclient])([https://www.onorca.dev/plugins/MichelVelzr/ork-dbclient](https://www.onorca.dev/plugins/MichelVelzr/ork-dbclient).
-
-Do not add a `publisher` field to `orca-plugin.json`. For Git and catalog installs, Orca derives the publisher from the repository owner, so this repository installs as `michelvelzr.ork-dbclient`. Keep `engines.orca` at `>=1.4.246` or newer.
-
-To publish to a catalog, run `orca plugin release-entry .` after committing and paste the printed entry into the catalog's `orca-catalog.json`. The release entry must reference the full commit SHA and the exact content hash.
 
 ## Contributing
 
