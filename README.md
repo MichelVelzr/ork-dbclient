@@ -4,7 +4,8 @@ Browse and query PostgreSQL, MySQL/MariaDB/Percona, SQLite and Redis from an Orc
 
 Current version: `0.1.0`. This is an early release. Use a least-privilege database account and back up data before running destructive statements.  
   
-![](orca-paste-1793992160326-683f6f4e-644e-4819-a029-2b04c6e6631a.png)
+<img width="1920" height="1049" alt="image" src="https://github.com/user-attachments/assets/e6cfc60c-1c41-4ca9-bd90-57f79780c83c" />
+
 
 ## Features
 
