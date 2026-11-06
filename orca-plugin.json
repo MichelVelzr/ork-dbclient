@@ -1,0 +1,38 @@
+{
+  "$schema": "https://raw.githubusercontent.com/stablyai/orca/main/docs/schemas/plugins/orca-plugin.v2.schema.json",
+  "manifestVersion": 2,
+  "id": "ork-dbclient",
+  "name": "Ork DBclient",
+  "version": "0.1.0",
+  "description": "Explore and query PostgreSQL, MySQL, MariaDB, Percona, SQLite and Redis from an Orca sidebar panel.",
+  "author": {
+    "name": "Corpoteg.com"
+  },
+  "license": "MIT",
+  "engines": {
+    "orca": ">=1.4.246"
+  },
+  "execution": "trusted-worker",
+  "pluginApi": 1,
+  "main": "dist/main.mjs",
+  "icon": "assets/icon.png",
+  "contributes": {
+    "panels": [
+      {
+        "id": "database-explorer",
+        "title": "Database Client",
+        "icon": "database",
+        "entry": "dist/panel.html",
+        "ui": "html"
+      }
+    ]
+  },
+  "capabilities": [
+    {
+      "kind": "storage:own"
+    },
+    {
+      "kind": "secrets:own"
+    }
+  ]
+}

@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ork DBclient</title>
+  <link rel="stylesheet" href="./panel.css" />
+</head>
+<body>
+  <div id="app">
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark">◉</span><div><strong>Database Client</strong><small>Universal connection explorer</small></div></div>
+      <button id="addConnection" class="primary">＋ New connection</button>
+    </header>
+    <main class="layout">
+      <aside class="sidebar">
+        <div class="section-heading"><span>CONNECTIONS</span><button id="refreshConnections" class="icon-button" title="Refresh">↻</button></div>
+        <div id="connectionList" class="connection-list"><div class="empty-state">No connections yet.<br/>Add a database to get started.</div></div>
+        <div class="sidebar-footer">PostgreSQL · MySQL · SQLite · Redis</div>
+      </aside>
+      <section class="workspace">
+        <div id="welcome" class="welcome"><div class="welcome-icon">▤</div><h1>Your databases, together.</h1><p>Create a connection or select one from the explorer.</p><button id="welcomeAdd" class="primary">Add your first connection</button></div>
+        <div id="databaseView" class="database-view hidden">
+          <div class="connection-header"><div><div class="eyebrow" id="connectionType">DATABASE</div><h2 id="connectionName">Connection</h2><div id="connectionMeta" class="muted"></div></div><div class="header-actions"><span id="connectionStatus" class="status">Disconnected</span><button id="editConnection" class="secondary" title="Edit connection">Edit</button><button id="testConnection" class="secondary">Test connection</button></div></div>
+          <div class="tabs"><button class="tab active" data-tab="query">SQL Editor</button><button class="tab" data-tab="redis">Redis Console</button><button class="tab" data-tab="objects">Objects</button></div>
+          <section id="queryTab" class="tab-content">
+            <div class="editor-toolbar"><span>QUERY.SQL</span><div><button id="clearQuery" class="ghost">Clear</button><button id="runQuery" class="run">▶ Run query</button></div></div>
+            <div id="sqlEditor" class="sql-editor"><textarea id="sqlInput" spellcheck="false">SELECT 1;</textarea></div>
+            <div class="results-heading"><strong>Results</strong><div class="result-actions"><span id="resultMeta" class="muted">Run a query to see results</span><button id="exportCsv" class="ghost" disabled>CSV</button><button id="exportJson" class="ghost" disabled>JSON</button></div></div>
+            <div id="queryResults" class="results"><div class="empty-state">Query results will appear here.</div></div>
+          </section>
+          <section id="redisTab" class="tab-content hidden">
+            <div class="console-help">Run Redis commands such as <code>INFO</code>, <code>SCAN 0 MATCH user:* COUNT 100</code> or <code>GET my:key</code>.</div>
+            <div class="redis-command"><input id="redisInput" placeholder="PING" autocomplete="off"/><button id="runRedis" class="run">▶ Run</button></div>
+            <pre id="redisOutput" class="redis-output">Redis command output will appear here.</pre>
+          </section>
+          <section id="objectsTab" class="tab-content hidden">
+            <div class="objects-toolbar"><strong>Database objects</strong><button id="refreshObjects" class="secondary">↻ Refresh</button></div>
+            <div id="objectList" class="object-list"><div class="empty-state">Load database objects to explore tables and views.</div></div>
+          </section>
+        </div>
+      </section>
+    </main>
+    <div id="modalBackdrop" class="modal-backdrop hidden">
+      <form id="connectionForm" class="modal">
+        <div class="modal-header"><div><div class="eyebrow">NEW CONNECTION</div><h2 id="modalTitle">Connect to a database</h2></div><button type="button" id="closeModal" class="icon-button">✕</button></div>
+        <label>Connection name<input name="name" required placeholder="Production PostgreSQL" maxlength="80"/></label>
+        <label>Database type<select name="type" id="dbType"><option value="postgres">PostgreSQL</option><option value="mysql">MySQL / MariaDB / Percona</option><option value="sqlite">SQLite</option><option value="redis">Redis</option></select></label>
+        <div id="networkFields">
+          <div class="field-row"><label>Host<input name="host" value="127.0.0.1"/></label><label>Port<input name="port" type="number" min="1" max="65535"/></label></div>
+          <label id="databaseLabel"><span id="databaseLabelText">Database</span> <span class="optional">(optional)</span><input name="database" placeholder="Leave empty to use the default database"/></label>
+          <label>Username<input name="username" autocomplete="username"/></label>
+          <label>Password<input name="password" type="password" autocomplete="new-password"/></label>
+          <label class="check-label"><input name="ssl" type="checkbox"/> Use TLS / SSL</label>
+        </div>
+        <div id="sqliteFields" class="hidden"><label>Absolute database file path<input name="filePath" placeholder="C:\\data\\app.sqlite or /home/user/app.db"/></label><p class="hint">The path is read by the local Orca plugin worker. Use a path on this computer.</p></div>
+        <div class="modal-actions"><button type="button" id="cancelModal" class="secondary">Cancel</button><button type="submit" class="primary">Save connection</button></div>
+        <div id="formError" class="form-error"></div>
+      </form>
+    </div>
+    <div id="deleteBackdrop" class="modal-backdrop hidden">
+      <div class="modal">
+        <div class="modal-header"><div><div class="eyebrow">DELETE CONNECTION</div><h2 id="deleteTitle">Delete connection?</h2></div><button type="button" id="closeDelete" class="icon-button">✕</button></div>
+        <p id="deleteMessage" class="muted">This removes the saved connection and its stored password.</p>
+        <div class="modal-actions"><button type="button" id="cancelDelete" class="secondary">Cancel</button><button type="button" id="confirmDelete" class="danger">Delete</button></div>
+      </div>
+    </div>
+    <div id="toast" class="toast hidden"></div>
+  </div>
+  <script src="./panel.js"></script>
+</body>
+</html>

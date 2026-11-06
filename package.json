@@ -1,0 +1,51 @@
+{
+  "name": "Ork DBclient",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Browse and query PostgreSQL, MySQL/MariaDB/Percona, SQLite and Redis from an Orca sidebar panel.",
+  "license": "MIT",
+  "author": {
+    "name": "Corpoteg.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MichelVelzr/ork-dbclient.git"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "keywords": [
+    "orca",
+    "orca-plugin",
+    "database",
+    "postgresql",
+    "mysql",
+    "mariadb",
+    "percona",
+    "sqlite",
+    "redis",
+    "sql-client"
+  ],
+  "scripts": {
+    "build": "node ./scripts/build.mjs",
+    "check": "node --check src/main.js && node --check src/panel.js",
+    "validate": "orca plugin validate .",
+    "release:entry": "orca plugin release-entry ."
+  },
+  "dependencies": {
+    "@codemirror/autocomplete": "^6.18.6",
+    "@codemirror/commands": "^6.8.1",
+    "@codemirror/lang-sql": "^6.9.0",
+    "@codemirror/state": "^6.5.2",
+    "@codemirror/view": "^6.36.5",
+    "@codemirror/language": "^6.11.0",
+    "@lezer/highlight": "^1.2.1",
+    "ioredis": "^5.6.1",
+    "mysql2": "^3.14.1",
+    "pg": "^8.16.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.5"
+  }
+}

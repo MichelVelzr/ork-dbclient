@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Syntax check
+        run: npm run check
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify manifest files exist
+        run: |
+          node -e "const fs=require('fs');const m=JSON.parse(fs.readFileSync('orca-plugin.json','utf8'));const files=[m.main,m.icon,...m.contributes.panels.map(p=>p.entry)];const missing=files.filter(f=>!fs.existsSync(f));if(missing.length){console.error('Missing files:',missing.join(', '));process.exit(1)}console.log('Manifest files present:',files.join(', '))"
+
+      - name: Verify committed dist is up to date
+        run: |
+          if ! git diff --exit-code -- dist; then
+            echo "dist/ is out of date. Run npm run build and commit the result."
+            exit 1
+          fi
