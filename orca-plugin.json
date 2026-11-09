@@ -3,8 +3,8 @@
   "manifestVersion": 2,
   "id": "ork-dbclient",
   "name": "Ork DBclient",
-  "version": "0.1.0",
-  "description": "Explore and query PostgreSQL, MySQL, MariaDB, Percona, SQLite and Redis from an Orca sidebar panel.",
+  "version": "0.2.0",
+  "description": "Explore and query PostgreSQL, MySQL, MariaDB, Percona, Microsoft SQL Server, SQLite and Redis from an Orca sidebar panel.",
   "author": {
     "name": "Corpoteg.com"
   },
@@ -16,6 +16,10 @@
   "pluginApi": 1,
   "main": "dist/main.mjs",
   "icon": "assets/icon.png",
+  "cover": {
+    "path": "assets/cover.png",
+    "alt": "Ork DBclient panel showing saved database connections, a SQL editor and a results table."
+  },
   "contributes": {
     "panels": [
       {

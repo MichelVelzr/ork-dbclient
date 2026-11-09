@@ -1,13 +1,14 @@
 import { Compartment, EditorState } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
-import { sql, PostgreSQL, MySQL, MariaSQL, SQLite } from '@codemirror/lang-sql';
+import { sql, PostgreSQL, MySQL, MariaSQL, SQLite, MSSQL } from '@codemirror/lang-sql';
 import { autocompletion } from '@codemirror/autocomplete';
 import './panel.css';
 
 const $ = (id) => document.getElementById(id);
-const state = { connections: [], active: null, editor: null, editId: null, pendingDelete: null, objects: [], lastResult: null, sqlLanguage: new Compartment() };
-const TYPES = { postgres: 'PostgreSQL', mysql: 'MySQL / MariaDB / Percona', sqlite: 'SQLite', redis: 'Redis' };
+const state = { connections: [], active: null, editor: null, editId: null, pendingDelete: null, objects: [], lastResult: null, baseSql: null, filters: [], applyingFilter: false, filterColumn: null, sqlLanguage: new Compartment() };
+const FILTER_ICON = '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M1 2h14l-5.5 6.2V13L6.5 15V8.2L1 2z" fill="currentColor"/></svg>';
+const TYPES = { postgres: 'PostgreSQL', mysql: 'MySQL / MariaDB / Percona', mssql: 'Microsoft SQL Server', sqlite: 'SQLite', redis: 'Redis' };
 const orca = window.orca;
 
 function notify(message, isError = false) {
@@ -39,12 +40,12 @@ function showConnection() {
   document.querySelector('[data-tab="query"]').classList.toggle('hidden', c.type === 'redis');
   if (c.type === 'redis') activateTab('redis'); else activateTab('query');
   if (state.editor) {
-    const lang = c.type === 'postgres' ? PostgreSQL : c.type === 'sqlite' ? SQLite : c.type === 'mysql' ? MySQL : MariaSQL;
+    const lang = c.type === 'postgres' ? PostgreSQL : c.type === 'sqlite' ? SQLite : c.type === 'mysql' ? MySQL : c.type === 'mssql' ? MSSQL : MariaSQL;
     state.editor.dispatch({ effects: state.sqlLanguage.reconfigure(sql({ dialect: lang })) });
   }
 }
 async function selectConnection(id) {
-  state.active = id; renderConnections(); showConnection();
+  state.active = id; state.baseSql = null; state.filters = []; closeFilterPopover(); renderConnections(); showConnection();
   try { await loadObjects(); } catch (e) { notify(e.message, true); }
 }
 function activateTab(tab) {
@@ -57,15 +58,107 @@ function setupEditor() {
   state.editor = new EditorView({ state: startState, parent });
   $('sqlInput').remove();
 }
+function quoteIdent(name) {
+  const c = activeConnection();
+  const value = String(name);
+  if (c?.type === 'mysql') return `\`${value.replace(/`/g, '``')}\``;
+  if (c?.type === 'mssql') return `[${value.replace(/]/g, ']]')}]`;
+  return `"${value.replace(/"/g, '""')}"`;
+}
+function sqlLiteral(value) { return `'${String(value).replace(/'/g, "''")}'`; }
+function scanTopLevel(sql) {
+  const trailingPattern = /^(order\s+by|group\s+by|having|limit|offset|fetch|for|union|except|intersect|option)\b/i;
+  let depth = 0, whereIndex = -1, trailingIndex = -1, endsInLineComment = false;
+  for (let i = 0; i < sql.length;) {
+    const ch = sql[i];
+    if (ch === "'" || ch === '"' || ch === '`') {
+      const quote = ch; i++;
+      while (i < sql.length) { if (sql[i] === quote) { if (sql[i + 1] === quote) { i += 2; continue; } i++; break; } i++; }
+      continue;
+    }
+    if (ch === '[') {
+      i++;
+      while (i < sql.length) { if (sql[i] === ']') { if (sql[i + 1] === ']') { i += 2; continue; } i++; break; } i++; }
+      continue;
+    }
+    if (ch === '-' && sql[i + 1] === '-') { i += 2; endsInLineComment = true; while (i < sql.length && sql[i] !== '\n') i++; if (i < sql.length) { endsInLineComment = false; i++; } continue; }
+    if (ch === '/' && sql[i + 1] === '*') { i += 2; while (i < sql.length && !(sql[i] === '*' && sql[i + 1] === '/')) i++; i += 2; continue; }
+    if (ch === '(') { depth++; i++; continue; }
+    if (ch === ')') { depth = Math.max(0, depth - 1); i++; continue; }
+    if (depth === 0 && /[A-Za-z]/.test(ch) && (i === 0 || !/[A-Za-z0-9_$]/.test(sql[i - 1]))) {
+      const rest = sql.slice(i);
+      if (whereIndex < 0 && /^where\b/i.test(rest)) whereIndex = i;
+      if (trailingIndex < 0 && trailingPattern.test(rest)) trailingIndex = i;
+    }
+    i++;
+  }
+  return { whereIndex, trailingIndex, endsInLineComment };
+}
+function buildFilteredSql() {
+  const original = String(state.baseSql || '').trim();
+  if (!state.filters.length) return original;
+  const hadSemicolon = original.endsWith(';');
+  const body = (hadSemicolon ? original.slice(0, -1) : original).replace(/\s+$/, '');
+  const { whereIndex, trailingIndex, endsInLineComment } = scanTopLevel(body);
+  const conditions = state.filters.map(f => `${quoteIdent(f.column)} LIKE ${sqlLiteral('%' + f.value + '%')}`).join(' AND ');
+  const insertAt = trailingIndex >= 0 ? trailingIndex : body.length;
+  const rawBefore = body.slice(0, insertAt), rawAfter = body.slice(insertAt);
+  const before = rawBefore.replace(/\s+$/, ''), after = rawAfter.replace(/^\s+/, '');
+  const gap = rawBefore.slice(before.length) + rawAfter.slice(0, rawAfter.length - after.length);
+  const sep = (/\n/.test(gap) || endsInLineComment) ? '\n' : ' ';
+  const next = whereIndex >= 0
+    ? `${before}${sep}AND ${conditions}${after ? ' ' + after : ''}`
+    : `${before}${sep}WHERE ${conditions}${after ? ' ' + after : ''}`;
+  return next + (hadSemicolon ? ';' : '');
+}
+function applyFilter(column, value) {
+  const c = activeConnection(); if (!c) return;
+  if (!state.baseSql) state.baseSql = state.editor.state.doc.toString().trim();
+  const trimmed = String(value || '').trim();
+  const existing = state.filters.find(f => f.column === column);
+  if (trimmed) { if (existing) existing.value = trimmed; else state.filters.push({ column, value: trimmed }); }
+  else if (existing) state.filters = state.filters.filter(f => f.column !== column);
+  const nextSql = buildFilteredSql();
+  state.editor.dispatch({ changes: { from: 0, to: state.editor.state.doc.length, insert: nextSql } });
+  closeFilterPopover();
+  state.applyingFilter = true;
+  runQuery().finally(() => { state.applyingFilter = false; });
+}
+function openFilterPopover(anchor, column) {
+  state.filterColumn = column;
+  const existing = state.filters.find(f => f.column === column);
+  $('filterTitle').textContent = `Filter ${column}`;
+  $('filterValue').value = existing?.value || '';
+  $('filterClear').classList.toggle('hidden', !existing);
+  const pop = $('filterPopover'); pop.classList.remove('hidden');
+  const rect = anchor.getBoundingClientRect();
+  pop.style.top = `${rect.bottom + 6}px`;
+  pop.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - 248))}px`;
+  $('filterValue').focus();
+  $('filterValue').select();
+}
+function closeFilterPopover() { state.filterColumn = null; $('filterPopover').classList.add('hidden'); }
+function clearFilters() {
+  if (!state.filters.length) return;
+  state.filters = [];
+  const nextSql = buildFilteredSql();
+  state.editor.dispatch({ changes: { from: 0, to: state.editor.state.doc.length, insert: nextSql } });
+  closeFilterPopover();
+  state.applyingFilter = true;
+  runQuery().finally(() => { state.applyingFilter = false; });
+}
 function renderResults(result) {
   state.lastResult = result;
   $('exportCsv').disabled = !(result.rows || []).length; $('exportJson').disabled = !(result.rows || []).length;
   const root = $('queryResults');
   const rows = result.rows || [];
+  $('clearFilters').classList.toggle('hidden', !state.filters.length);
   $('resultMeta').textContent = `${result.rowCount ?? rows.length} row(s)${result.truncated ? ' · first 500 shown' : ''}${result.command ? ' · '+result.command : ''}`;
   if (!rows.length) { root.innerHTML = `<div class="empty-state">Query completed. ${esc(result.rowCount ?? 0)} affected row(s).</div>`; return; }
   const cols = result.fields?.length ? result.fields : Object.keys(rows[0]);
-  root.innerHTML = `<div class="table-wrap"><table><thead><tr>${cols.map(c => `<th>${esc(c)}</th>`).join('')}</tr></thead><tbody>${rows.map(row => `<tr>${cols.map(c => `<td title="${esc(formatCell(row[c]))}">${esc(formatCell(row[c]))}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+  closeFilterPopover();
+  root.innerHTML = `<div class="table-wrap"><table><thead><tr>${cols.map(col => { const active = state.filters.some(f => f.column === col); return `<th><span class="th-label">${esc(col)}</span><button type="button" class="filter-btn${active ? ' active' : ''}" data-filter="${esc(col)}" title="Filter ${esc(col)}">${FILTER_ICON}</button></th>`; }).join('')}</tr></thead><tbody>${rows.map(row => `<tr>${cols.map(c => `<td title="${esc(formatCell(row[c]))}">${esc(formatCell(row[c]))}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+  root.querySelectorAll('[data-filter]').forEach(btn => btn.addEventListener('click', e => { e.stopPropagation(); openFilterPopover(btn, btn.dataset.filter); }));
 }
 async function exportResult(format) {
   const result = state.lastResult; if (!result?.rows?.length) return;
@@ -79,6 +172,7 @@ function formatCell(value) { if (value === null) return 'NULL'; if (value === un
 async function runQuery() {
   const c = activeConnection(); if (!c) return;
   const sqlText = state.editor.state.doc.toString().trim(); if (!sqlText) return;
+  if (!state.applyingFilter) { state.baseSql = sqlText; state.filters = []; }
   $('runQuery').disabled = true; $('runQuery').textContent = 'Running…';
   try { const result = await request('database.query', { id: c.id, sql: sqlText }); renderResults(result); $('connectionStatus').textContent = 'Connected'; $('connectionStatus').className = 'status online'; }
   catch (e) { $('queryResults').innerHTML = `<div class="error-panel">${esc(e.message)}</div>`; notify(e.message, true); }
@@ -102,7 +196,7 @@ async function loadObjects() {
   $('objectList').innerHTML = [...groups.entries()].map(([database, items]) => {
     const rows = items.map(o => {
       const schema = o.schema || o.schema_name || '';
-      const detail = c.type === 'postgres' && schema ? `${schema} · ${o.kind || 'table'}` : (o.kind || 'table');
+      const detail = (c.type === 'postgres' || c.type === 'mssql') && schema ? `${schema} · ${o.kind || 'table'}` : (o.kind || 'table');
       return `<div class="object-row"><span>▦</span><div><strong>${esc(o.name)}</strong><small>${esc(detail)}</small></div><button class="ghost" data-table="${esc(o.name)}" data-schema="${esc(schema)}">SELECT</button></div>`;
     }).join('');
     return `<div class="object-group"><button type="button" class="object-group-header" data-group-toggle><span class="group-chevron">▸</span><span class="db-icon">▤</span><span class="object-group-label"><strong>${esc(database)}</strong><small>${items.length} ${items.length === 1 ? 'table/view' : 'tables/views'}</small></span></button><div class="object-group-body hidden">${rows}</div></div>`;
@@ -113,8 +207,8 @@ async function loadObjects() {
   }));
   $('objectList').querySelectorAll('[data-table]').forEach(btn => btn.addEventListener('click', () => {
     const schema = btn.dataset.schema; const table = btn.dataset.table;
-    const quote = c.type === 'mysql' ? '`' : '"';
-    const target = schema && (c.type === 'postgres' || c.type === 'mysql') ? `${quote}${schema}${quote}.${quote}${table}${quote}` : `${quote}${table}${quote}`;
+    const quoteName = value => c.type === 'mysql' ? `\`${value}\`` : c.type === 'mssql' ? `[${value}]` : `"${value}"`;
+    const target = schema && (c.type === 'postgres' || c.type === 'mysql' || c.type === 'mssql') ? `${quoteName(schema)}.${quoteName(table)}` : quoteName(table);
     state.editor.dispatch({ changes: { from: 0, to: state.editor.state.doc.length, insert: `SELECT * FROM ${target} LIMIT 100;` } });
     activateTab('query');
   }));
@@ -163,7 +257,7 @@ function updateTypeFields() {
   const type = $('dbType').value; $('networkFields').classList.toggle('hidden', type === 'sqlite'); $('sqliteFields').classList.toggle('hidden', type !== 'sqlite');
   $('databaseLabel').classList.toggle('hidden', type === 'sqlite');
   $('databaseLabelText').textContent = type === 'redis' ? 'Database number' : 'Database';
-  const port = $('connectionForm').elements.port; if (port) port.value = type === 'postgres' ? 5432 : type === 'redis' ? 6379 : 3306;
+  const port = $('connectionForm').elements.port; if (port) port.value = type === 'postgres' ? 5432 : type === 'mssql' ? 1433 : type === 'redis' ? 6379 : 3306;
   $('connectionForm').elements.database.placeholder = type === 'redis' ? '0' : 'Leave empty to use the default database';
 }
 async function saveConnection(event) {
@@ -204,7 +298,12 @@ $('editConnection').addEventListener('click', () => { const c = activeConnection
 $('testConnection').addEventListener('click', testConnection); $('runQuery').addEventListener('click', runQuery);
 $('clearQuery').addEventListener('click', () => state.editor.dispatch({ changes: { from: 0, to: state.editor.state.doc.length, insert: '' } }));
 $('exportCsv').addEventListener('click', () => exportResult('csv')); $('exportJson').addEventListener('click', () => exportResult('json'));
+$('clearFilters').addEventListener('click', clearFilters);
 $('runRedis').addEventListener('click', runRedis); $('redisInput').addEventListener('keydown', e => { if (e.key === 'Enter') runRedis(); });
+$('filterApply').addEventListener('click', () => { if (state.filterColumn) applyFilter(state.filterColumn, $('filterValue').value); });
+$('filterClear').addEventListener('click', () => { if (state.filterColumn) applyFilter(state.filterColumn, ''); });
+$('filterValue').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('filterApply').click(); } else if (e.key === 'Escape') closeFilterPopover(); });
+document.addEventListener('click', e => { if (state.filterColumn && !e.target.closest('#filterPopover') && !e.target.closest('.filter-btn')) closeFilterPopover(); });
 $('refreshObjects').addEventListener('click', () => loadObjects().catch(e => notify(e.message, true)));
 document.querySelectorAll('.tab').forEach(el => el.addEventListener('click', () => activateTab(el.dataset.tab)));
 setupEditor();

@@ -16,7 +16,7 @@
       <aside class="sidebar">
         <div class="section-heading"><span>CONNECTIONS</span><button id="refreshConnections" class="icon-button" title="Refresh">↻</button></div>
         <div id="connectionList" class="connection-list"><div class="empty-state">No connections yet.<br/>Add a database to get started.</div></div>
-        <div class="sidebar-footer">PostgreSQL · MySQL · SQLite · Redis</div>
+        <div class="sidebar-footer">PostgreSQL · MySQL · MSSQL · SQLite · Redis</div>
       </aside>
       <section class="workspace">
         <div id="welcome" class="welcome"><div class="welcome-icon">▤</div><h1>Your databases, together.</h1><p>Create a connection or select one from the explorer.</p><button id="welcomeAdd" class="primary">Add your first connection</button></div>
@@ -26,7 +26,7 @@
           <section id="queryTab" class="tab-content">
             <div class="editor-toolbar"><span>QUERY.SQL</span><div><button id="clearQuery" class="ghost">Clear</button><button id="runQuery" class="run">▶ Run query</button></div></div>
             <div id="sqlEditor" class="sql-editor"><textarea id="sqlInput" spellcheck="false">SELECT 1;</textarea></div>
-            <div class="results-heading"><strong>Results</strong><div class="result-actions"><span id="resultMeta" class="muted">Run a query to see results</span><button id="exportCsv" class="ghost" disabled>CSV</button><button id="exportJson" class="ghost" disabled>JSON</button></div></div>
+            <div class="results-heading"><strong>Results</strong><div class="result-actions"><span id="resultMeta" class="muted">Run a query to see results</span><button id="clearFilters" class="ghost hidden">Clear filters</button><button id="exportCsv" class="ghost" disabled>CSV</button><button id="exportJson" class="ghost" disabled>JSON</button></div></div>
             <div id="queryResults" class="results"><div class="empty-state">Query results will appear here.</div></div>
           </section>
           <section id="redisTab" class="tab-content hidden">
@@ -45,7 +45,7 @@
       <form id="connectionForm" class="modal">
         <div class="modal-header"><div><div class="eyebrow">NEW CONNECTION</div><h2 id="modalTitle">Connect to a database</h2></div><button type="button" id="closeModal" class="icon-button">✕</button></div>
         <label>Connection name<input name="name" required placeholder="Production PostgreSQL" maxlength="80"/></label>
-        <label>Database type<select name="type" id="dbType"><option value="postgres">PostgreSQL</option><option value="mysql">MySQL / MariaDB / Percona</option><option value="sqlite">SQLite</option><option value="redis">Redis</option></select></label>
+        <label>Database type<select name="type" id="dbType"><option value="postgres">PostgreSQL</option><option value="mysql">MySQL / MariaDB / Percona</option><option value="mssql">Microsoft SQL Server</option><option value="sqlite">SQLite</option><option value="redis">Redis</option></select></label>
         <div id="networkFields">
           <div class="field-row"><label>Host<input name="host" value="127.0.0.1"/></label><label>Port<input name="port" type="number" min="1" max="65535"/></label></div>
           <label id="databaseLabel"><span id="databaseLabelText">Database</span> <span class="optional">(optional)</span><input name="database" placeholder="Leave empty to use the default database"/></label>
@@ -64,6 +64,11 @@
         <p id="deleteMessage" class="muted">This removes the saved connection and its stored password.</p>
         <div class="modal-actions"><button type="button" id="cancelDelete" class="secondary">Cancel</button><button type="button" id="confirmDelete" class="danger">Delete</button></div>
       </div>
+    </div>
+    <div id="filterPopover" class="filter-popover hidden">
+      <div id="filterTitle" class="filter-title">Filter column</div>
+      <input id="filterValue" placeholder="Value to match" autocomplete="off"/>
+      <div class="filter-actions"><button type="button" id="filterClear" class="ghost">Clear</button><button type="button" id="filterApply" class="primary">Apply</button></div>
     </div>
     <div id="toast" class="toast hidden"></div>
   </div>

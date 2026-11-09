@@ -1,10 +1,12 @@
 import pg from 'pg';
 import mysql from 'mysql2/promise';
+import mssql from 'mssql';
 import Redis from 'ioredis';
 
 const { Pool } = pg;
 const STORAGE_KEY = 'connections.v1';
 const pools = new Map();
+const mssqlPools = new Map();
 const redisClients = new Map();
 const SQLITE_LIMIT = 500;
 
@@ -24,7 +26,7 @@ function assertText(value, field, max = 512) {
 }
 function normalizeConnection(input) {
   const type = assertText(input.type, 'database type', 32).toLowerCase();
-  if (!['postgres', 'mysql', 'sqlite', 'redis'].includes(type)) throw new Error('Unsupported database type');
+  if (!['postgres', 'mysql', 'mssql', 'sqlite', 'redis'].includes(type)) throw new Error('Unsupported database type');
   const name = assertText(input.name, 'connection name', 80);
   const id = input.id || crypto.randomUUID();
   const result = { id, type, name, createdAt: input.createdAt || new Date().toISOString() };
@@ -32,7 +34,7 @@ function normalizeConnection(input) {
     result.filePath = assertText(input.filePath, 'SQLite file path', 2048);
   } else {
     result.host = assertText(input.host || '127.0.0.1', 'host', 255);
-    result.port = Number(input.port || (type === 'postgres' ? 5432 : type === 'redis' ? 6379 : 3306));
+    result.port = Number(input.port || (type === 'postgres' ? 5432 : type === 'mssql' ? 1433 : type === 'redis' ? 6379 : 3306));
     if (!Number.isInteger(result.port) || result.port < 1 || result.port > 65535) throw new Error('Invalid port');
     result.database = String(input.database || (type === 'redis' ? '0' : '')).slice(0, 128);
     result.username = String(input.username || '').slice(0, 128);
@@ -52,6 +54,8 @@ async function getPassword(orca, id) {
 async function closeClient(id) {
   const pool = pools.get(id);
   if (pool) { await pool.end().catch(() => {}); pools.delete(id); }
+  const mssqlPool = mssqlPools.get(id);
+  if (mssqlPool) { await mssqlPool.close().catch(() => {}); mssqlPools.delete(id); }
   const redis = redisClients.get(id);
   if (redis) { redis.disconnect(); redisClients.delete(id); }
 }
@@ -75,6 +79,22 @@ async function getMysql(orca, c) {
     connectTimeout: 8000, decimalNumbers: false, dateStrings: true,
     enableKeepAlive: true
   });
+}
+async function getMssql(orca, c) {
+  if (!mssqlPools.has(c.id)) {
+    const password = await getPassword(orca, c.id);
+    const pool = new mssql.ConnectionPool({
+      server: c.host, port: c.port, database: c.database || undefined,
+      user: c.username || undefined, password: password || undefined,
+      options: { encrypt: Boolean(c.ssl), trustServerCertificate: !c.ssl, enableArithAbort: true },
+      pool: { max: 3, min: 0, idleTimeoutMillis: 30000 },
+      connectionTimeout: 8000, requestTimeout: 30000
+    });
+    pool.on('error', () => {});
+    await pool.connect();
+    mssqlPools.set(c.id, pool);
+  }
+  return mssqlPools.get(c.id);
 }
 async function getRedis(orca, c) {
   if (!redisClients.has(c.id)) {
@@ -114,6 +134,15 @@ async function querySql(orca, c, sql) {
       return { rows: [], fields: [], rowCount: result.affectedRows ?? 0, insertId: result.insertId, warningStatus: result.warningStatus };
     } finally { await db.end(); }
   }
+  if (c.type === 'mssql') {
+    const pool = await getMssql(orca, c);
+    const result = await pool.request().query(sql);
+    const recordset = result.recordset || [];
+    const rows = Array.from(recordset);
+    const fields = Object.keys(recordset.columns || {});
+    const affected = Array.isArray(result.rowsAffected) ? result.rowsAffected.reduce((sum, n) => sum + Number(n || 0), 0) : 0;
+    return { rows: rows.slice(0, 500), fields, rowCount: rows.length || affected, truncated: rows.length > 500 };
+  }
   if (c.type === 'sqlite') {
     const db = await getSqlite(c);
     try {
@@ -141,6 +170,11 @@ async function listTree(orca, c) {
         : await db.query(`SELECT table_schema AS db_name, table_schema AS schema_name, table_name AS name, table_type AS kind FROM information_schema.tables WHERE table_schema NOT IN ('information_schema','mysql','performance_schema','sys') ORDER BY table_schema, table_name`);
       return rows;
     } finally { await db.end(); }
+  }
+  if (c.type === 'mssql') {
+    const pool = await getMssql(orca, c);
+    const result = await pool.request().query(`SELECT TABLE_CATALOG AS db_name, TABLE_SCHEMA AS schema_name, TABLE_NAME AS name, TABLE_TYPE AS kind FROM INFORMATION_SCHEMA.TABLES ORDER BY TABLE_CATALOG, TABLE_SCHEMA, TABLE_NAME`);
+    return result.recordset || [];
   }
   if (c.type === 'sqlite') {
     const db = await getSqlite(c, true);
@@ -196,6 +230,7 @@ export default async function activate(orca) {
     if (!c) throw new Error('Connection not found');
     if (c.type === 'postgres') { await (await getPg(orca, c)).query('SELECT 1'); }
     else if (c.type === 'mysql') { const db = await getMysql(orca, c); try { await db.query('SELECT 1'); } finally { await db.end(); } }
+    else if (c.type === 'mssql') { await (await getMssql(orca, c)).request().query('SELECT 1'); }
     else if (c.type === 'sqlite') { const db = await getSqlite(c, true); try { db.prepare('SELECT 1').get(); } finally { db.close(); } }
     else { await (await getRedis(orca, c)).ping(); }
     return { ok: true, message: 'Connection successful' };
@@ -217,7 +252,7 @@ export default async function activate(orca) {
     return await redisCommand(orca, c, parts.map(p => p.replace(/^['"]|['"]$/g, '')));
   });
   handle(orca, 'connections.closeAll', async () => {
-    await Promise.all([...pools.keys(), ...redisClients.keys()].map(closeClient));
+    await Promise.all([...pools.keys(), ...mssqlPools.keys(), ...redisClients.keys()].map(closeClient));
     return { ok: true };
   });
 
@@ -227,6 +262,8 @@ export default async function activate(orca) {
 export async function deactivate() {
   await Promise.all([...pools.values()].map(pool => pool.end().catch(() => {})));
   pools.clear();
+  await Promise.all([...mssqlPools.values()].map(pool => pool.close().catch(() => {})));
+  mssqlPools.clear();
   for (const client of redisClients.values()) client.disconnect();
   redisClients.clear();
 }
